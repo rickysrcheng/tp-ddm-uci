@@ -2,7 +2,8 @@
 
 ## Dependencies
 
-Python 3.9, psycopg2
+Python 3.9, additional modules required are listed in requirements.txt. Use pip to install.
+
 Docker
 
 ## Setting up scripts
