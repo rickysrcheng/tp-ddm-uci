@@ -7,6 +7,7 @@ from datetime import datetime
 
 load_dotenv()
 
+# Postgres Global Config
 POSTGRES_USER = os.getenv('POSTGRES_USER')
 POSTGRES_PASSWORD = os.getenv('POSTGRES_PASSWORD')
 POSTGRES_DB = os.getenv('POSTGRES_DB')
@@ -40,19 +41,24 @@ def parseInsertFile(fname):
     with open(fname, 'r') as f:
         data = f.readlines()
     data_time = []
-    for lines in data:
-        if "INSERT" in lines:
-            inst_time = lines.split(',')[-2].replace("'", "").strip()
+    for line in data:
+        if "INSERT" in line:
+            inst_time = line.split(',')[-2].replace("'", "").strip()
             inst_timestamp = int(datetime.strptime(inst_time, "%Y-%m-%d %H:%M:%S").timestamp())
-            data_time.append((inst_timestamp, inst_time, lines.strip()))
+            data_time.append((inst_timestamp, inst_time, line.strip()))
     return data_time
 
 def parseQueryFile(fname):
     with open(fname, 'r') as f:
-        data = f.read()
-    data = data.split("\"")
-    print(data)
-    print(len(data))
+        data = f.read().split("\"")
+    data_time = []
+    for i in range(0, len(data)-1, 2):
+        inst_time = data[i].replace("\n", "").replace("T", " ").replace("Z,", "")
+        inst_timestamp = int(datetime.strptime(inst_time, "%Y-%m-%d %H:%M:%S").timestamp())
+        inst = data[i+1].replace("\n", "")
+        data_time.append((inst_timestamp, inst_time, inst))
+    return data_time
+    
 
 def preprocessWorkload(qfname, ofname, sfname, transaction_size):
     qry_data = parseQueryFile(qfname)
