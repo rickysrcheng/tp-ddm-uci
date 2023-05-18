@@ -5,3 +5,4 @@ if [ "$(docker inspect -f '{{.State.Running}}' $PG_CONTAINER_NAME 2>/dev/null)" 
     docker rm $PG_CONTAINER_NAME
 fi
 docker compose up -d
+sleep 10
