@@ -187,7 +187,6 @@ def idea3Parallel(workload, mpl, nsize, iso_level):
     barrier.wait()
 
     print("Starting Simulation")
-    start = time.time()
 
     # Collect data point from queue to avoid excessive RAM usage
     num_transactions = 0
@@ -206,18 +205,20 @@ def idea3Parallel(workload, mpl, nsize, iso_level):
                 total_time += response_time
                 min_response = min(min_response, response_time)
                 max_response = max(max_response, response_time)
-                if num_transactions % 100 == 0:
+                if num_transactions % 100000 == 0:
+                    curr_elapsed = time.time() - start_time
                     print('----------------------------')
-                    print(f"Time Elapsed: {time.time() - start}")
-                    print(f"Total Txn Time: {total_time}")
-                    print(f"Num Txns: {num_transactions}")
-                    print(f"Avg Response Time: {total_time/num_transactions}")
-                    print(f"Max Response Time: {max_response}")
-                    print(f"Min Response Time: {min_response}")
+                    print(f"Total Response Time: {total_time:.02f}s")
+                    print(f"Total Clock Time: {curr_elapsed:.02f}s")
+                    print(f"Num Txns: {num_transactions}/{len(workload_transactions)}, {num_transactions/len(workload_transactions)*100:.02f}%")
+                    print(f"Avg Response Time: {total_time/num_transactions:.07f} s/txn")
+                    print(f"Avg Throughput: {num_transactions/curr_elapsed:.02f} txn/s")
+                    print(f"Max Response Time: {max_response:.07f}s")
+                    print(f"Min Response Time: {min_response:.07f}s")
                     print('----------------------------')
         except queue.Empty:
             pass
-    elapsed_time = time.time() - start
+    elapsed_time = time.time() - start_time
     print(f"Simulation ended in {elapsed_time} seconds.\n")
     
     for proc in processes:
@@ -226,10 +227,10 @@ def idea3Parallel(workload, mpl, nsize, iso_level):
     print(f"Total Response Time: {total_time:.02f}s")
     print(f"Total Clock Time: {elapsed_time:.02f}s")
     print(f"Num Txns: {num_transactions}")
-    print(f"Avg Response Time: {elapsed_time/num_transactions:.06f} s/txn")
+    print(f"Avg Response Time: {elapsed_time/num_transactions:.07f} s/txn")
     print(f"Avg Throughput: {num_transactions/elapsed_time:.02f} txn/s")
-    print(f"Max Response Time: {max_response:.06f}s")
-    print(f"Min Response Time: {min_response:.06f}s")
+    print(f"Max Response Time: {max_response:.07f}s")
+    print(f"Min Response Time: {min_response:.07f}s")
 
 def cleanDatabase(createDBfname, dropDBfname):
     conn = getConnection()
@@ -280,8 +281,8 @@ def main():
     # Spawn worker processes
     # Idea #1: have main process generate transactions, sleep for necessary amount of time before placing on queue
     # Idea #2: main process generates transactions, worker process sleeps if time does not match up
-    # Idea #3: divide transactions amongst N workers, each worker sleeps (advantage: no input queue needed)
-    idea3Parallel(workload[0:10000], args.mpl, args.nsize, isolation_levels[args.isolation])
+    # Idea #3: divide transactions amongst N workers, each worker sleeps (pro: no input queue needed) (con: some processes may finish a lot earlier than others)
+    idea3Parallel(workload, args.mpl, args.nsize, isolation_levels[args.isolation])
 
 if __name__ == "__main__":
     main()
