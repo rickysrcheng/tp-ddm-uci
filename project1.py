@@ -16,7 +16,7 @@ POSTGRES_USER = os.getenv('POSTGRES_USER')
 POSTGRES_PASSWORD = os.getenv('POSTGRES_PASSWORD')
 POSTGRES_DB = os.getenv('POSTGRES_DB')
 HOST = 'localhost'
-PORT = 5432
+PORT = os.getenv('PG_HOST_PORT')
 
 # Global Settings
 observation_tables = ['wifiapobservation', 'wemoobservation', 'thermometerobservation']
@@ -70,6 +70,7 @@ def workerIdea3(pipe, result_q, iso_level, barrier, start_time, id):
     conn = getConnection()
     conn.set_session(isolation_level=iso_level, autocommit=False)
     transactions = pipe.recv()
+    pipe.close()
     barrier.wait()
     
     while time.time() < start_time:
@@ -186,14 +187,13 @@ def prepareTransactions(workload_data, transaction_size):
 
     return workload_transactions
 
-def idea1Parallel(workload, mpl, nsize, iso_level):
-    workload_transactions = prepareTransactions(workload, nsize)
+def idea1Parallel(fnames, mpl, nsize, iso_level):
     result_queue = mp.Queue()
     input_queue = mp.Queue()
     barrier = mp.Barrier(mpl + 1)
     processes = []
-    # 15 second delay for synchronization
-    start_time = time.time() + 15
+    # 60 second delay for synchronization
+    start_time = time.time() + 60
     for i in range(mpl):
         processes.append(mp.Process(target=workerIdea1, args=(input_queue, result_queue, iso_level, barrier, start_time, i)))
     for proc in processes:
@@ -201,7 +201,8 @@ def idea1Parallel(workload, mpl, nsize, iso_level):
     barrier.wait()
 
     print("Starting Simulation")
-
+    workload = preprocessWorkload(fnames[0], fnames[1], fnames[2], fnames[3])
+    workload_transactions = prepareTransactions(workload, nsize)
     # Collect data point from queue to avoid excessive RAM usage
     for transaction in workload_transactions:
         input_queue.put_nowait(transaction)
@@ -243,8 +244,8 @@ def idea3Parallel(fnames, mpl, nsize, iso_level):
     result_queue = mp.Queue()
     barrier = mp.Barrier(mpl + 1)
     processes = []
-    # 15 second delay for synchronization
-    start_time = time.time() + 60
+    # 90 second delay for synchronization
+    start_time = time.time() + 90
     pipes = []
     for i in range(mpl):
         pipes.append(mp.Pipe())
@@ -265,11 +266,14 @@ def idea3Parallel(fnames, mpl, nsize, iso_level):
         worker %= mpl
     
     # RAM blew up a couple times so devising better ways to monitor progress without wrecking pc
-    # turns out piping input works slightly better
+    # turns out piping input works INFINITELY better than sending the child processes super large lists
+    # ¯\_(ツ)_/¯ 
     for i in range(mpl):
         pipes[i][1].send(worker_transactions[i])
+        pipes[i][1].close()
     barrier.wait()
-
+    while time.time() < start_time:
+        continue
     print("Starting Simulation")
 
     # Collect data point from queue to avoid excessive RAM usage
@@ -298,6 +302,7 @@ def idea3Parallel(fnames, mpl, nsize, iso_level):
                 monitor[2][idx] += result[4] # total response time
                 monitor[3][idx] = max(monitor[3][idx], result[5]) # max
                 monitor[4][idx] = min(monitor[3][idx], result[6]) # min
+                # Not too sure why this skips 80%
                 if monitor[0][idx] == mpl:
                     curr_elapsed = time.time() - start_time
                     print('----------------------------')
