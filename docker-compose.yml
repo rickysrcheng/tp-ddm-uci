@@ -14,4 +14,8 @@ services:
     ports:
       - "5432:5432"
     restart: unless-stopped
-
+    deploy:
+      resources:
+        limits:
+          memory: 8g
+    shm_size: 10g
