@@ -239,12 +239,12 @@ def idea1Parallel(workload, mpl, nsize, iso_level):
     print(f"Min Response Time: {min_response:.07f}s")
     return total_time, elapsed_time, num_transactions, avg_response, throughput, max_response, min_response
 
-def idea3Parallel(workload, mpl, nsize, iso_level):
+def idea3Parallel(fnames, mpl, nsize, iso_level):
     result_queue = mp.Queue()
     barrier = mp.Barrier(mpl + 1)
     processes = []
     # 15 second delay for synchronization
-    start_time = time.time() + 30
+    start_time = time.time() + 60
     pipes = []
     for i in range(mpl):
         pipes.append(mp.Pipe())
@@ -253,6 +253,8 @@ def idea3Parallel(workload, mpl, nsize, iso_level):
 
     for proc in processes:
         proc.start()
+    # move preprocessing until after subprocesses have started so they don't inherit junk
+    workload = preprocessWorkload(fnames[0], fnames[1], fnames[2], fnames[3])
     workload_transactions = prepareTransactions(workload, nsize)
     worker_transactions = [[] for i in range(mpl)]
     num = len(workload_transactions)
@@ -299,6 +301,7 @@ def idea3Parallel(workload, mpl, nsize, iso_level):
                 if monitor[0][idx] == mpl:
                     curr_elapsed = time.time() - start_time
                     print('----------------------------')
+                    print(f"TEST Parameters - txn size={nsize}, mpl={mpl}, isolation level={iso_level}")
                     print(f"Total Response Time: {monitor[2][idx]:.02f}s")
                     print(f"Total Clock Time: {curr_elapsed:.02f}s")
                     print(f"Num Txns: {monitor[1][idx]}/{num}, {monitor[1][idx]/num*100:.02f}%")
@@ -371,8 +374,8 @@ def main():
         writer = csv.writer(f)
         writer.writerow(fields)
 
-    # Preprocess workload
-    workload = preprocessWorkload(query_filename, obs_filename, semobs_filename, preprocessed_filename)
+    # Preprocess workload to generate file
+    preprocessWorkload(query_filename, obs_filename, semobs_filename, preprocessed_filename)
     
     # Spawn worker processes
     # Idea #1: have main process generate transactions, sleep for necessary amount of time before placing on queue
@@ -388,7 +391,7 @@ def main():
                 print("Database cleaned.")
                 insertMetadata(metadata_filename)
                 print("Metadata inserted.")
-                total_response_time, elapsed_time, num_transactions, avg_response, throughput, max_response, min_response = idea3Parallel(workload, mpl, txn_size, iso_level)
+                total_response_time, elapsed_time, num_transactions, avg_response, throughput, max_response, min_response = idea3Parallel((query_filename, obs_filename, semobs_filename, preprocessed_filename), mpl, txn_size, iso_level)
                 result = [txn_size, mpl, iso_level, total_response_time, elapsed_time, num_transactions, avg_response, throughput, max_response, min_response]
                 with open(result_file, 'a') as f:
                     writer = csv.writer(f)
