@@ -86,7 +86,13 @@ def workerIdea3(pipe, result_q, iso_level, barrier, start_time, id):
         res = None
         cur = conn.cursor(withhold=False)
         response_start = time.time()
-        cur.execute(transaction[2])
+        while True:
+            try:
+                cur.execute(transaction[2])
+                break
+            except:
+                conn.rollback()
+                time.sleep(0.01)
         if cur.description != None:
             res = cur.fetchall()
         conn.commit()
@@ -283,6 +289,7 @@ def idea3Parallel(fnames, mpl, nsize, iso_level):
     max_response = -1
     num_terminate = 0
     monitor = [[0 for _ in range(9)] for i in range(5)] # wtf
+    curr_idx = 0
     while num_terminate != mpl:
         try:
             result = result_queue.get_nowait()
@@ -303,7 +310,8 @@ def idea3Parallel(fnames, mpl, nsize, iso_level):
                 monitor[3][idx] = max(monitor[3][idx], result[5]) # max
                 monitor[4][idx] = min(monitor[3][idx], result[6]) # min
                 # Not too sure why this skips 80%
-                if monitor[0][idx] == mpl:
+                if monitor[0][idx] == mpl and idx >= curr_idx:
+                    curr_idx = idx
                     curr_elapsed = time.time() - start_time
                     print('----------------------------')
                     print(f"TEST Parameters - txn size={nsize}, mpl={mpl}, isolation level={iso_level}")
@@ -387,9 +395,9 @@ def main():
     # Idea #2: main process generates transactions, worker process sleeps if time does not match up
     # Idea #3: divide transactions amongst N workers, each worker sleeps (pro: no input queue needed) (con: some processes may finish a lot earlier than others)
     #idea3Parallel(workload, args.mpl, args.nsize, isolation_levels[args.isolation])
-    for mpl in [256, 128, 64, 32, 16, 8]:
-        for txn_size in [1, 2, 4, 8, 16, 32]:
-            for iso_level in isolation_levels:
+    for txn_size in [1, 4, 16, 32]:
+        for mpl in [256, 128, 64, 32, 16]:
+            for iso_level in ["SERIALIZABLE", "REPEATABLE READ", "READ COMMITTED"]:
                 print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
                 print(f"TEST {args.conc} concurrency: Parameters - txn size={txn_size}, mpl={mpl}, isolation level={iso_level}")
                 cleanDatabase(create_table_filename, drop_table_filename)

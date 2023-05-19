@@ -17,5 +17,5 @@ services:
     deploy:
       resources:
         limits:
-          memory: 8g
-    shm_size: 10g
+          memory: 16g
+    shm_size: 20g
