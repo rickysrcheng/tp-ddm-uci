@@ -24,6 +24,7 @@ semantic_tables = ['presence', 'occupancy']
 # use with conn.set_session(..., isolation_level=" ")
 isolation_levels = ["READ UNCOMMITTED", "READ COMMITTED", "REPEATABLE READ", "SERIALIZABLE"]
 TERMINATE_PROCESS = (-1, -1, "TERMINATE")
+CUTOFF_TIME_THRESHOLD = 60*30 # maximum 30 minute runtime
 
 transactions_list = None
 
@@ -80,33 +81,43 @@ def workerIdea3(pipe, result_q, iso_level, barrier, start_time, id):
     min_response_time = 100000000000
     max_response_time = -1
     percent = 0.1
+    total_response_time_delay = 0.0
     for idx, transaction in enumerate(transactions):
         while time.time() - start_time < transaction[0]:
             continue
         res = None
         cur = conn.cursor(withhold=False)
-        response_start = time.time()
+        start = time.time()
         while True:
             try:
+                response_start = time.time()
                 cur.execute(transaction[2])
+                if cur.description != None:
+                    res = cur.fetchall()
+                conn.commit()
+                response = time.time() - response_start
                 break
             except:
                 conn.rollback()
                 time.sleep(0.01)
-        if cur.description != None:
-            res = cur.fetchall()
-        conn.commit()
+                if time.time() - start_time > CUTOFF_TIME_THRESHOLD:
+                    cur.close()
+                    result_q.put_nowait((0, len(transactions), total_response_time, max_response_time, min_response_time, total_response_time_delay))
+                    conn.close()
+                    return
+
         cur.close()
-        response = time.time() - response_start
+        response_total = time.time() - start
         # result_q.put_nowait(response)
         total_response_time += response
+        total_response_time_delay += response_total - response
         min_response_time = min(min_response_time, response)
         max_response_time = max(max_response_time, response)
         if idx / len(transactions) > percent:
-            result_q.put_nowait((-1, id, percent, idx + 1, total_response_time, max_response_time, min_response_time))
+            result_q.put_nowait((-1, id, percent, idx + 1, total_response_time, max_response_time, min_response_time, total_response_time_delay))
             percent += 0.1
 
-    result_q.put_nowait((0, len(transactions), total_response_time, max_response_time, min_response_time))
+    result_q.put_nowait((0, len(transactions), total_response_time, max_response_time, min_response_time, total_response_time_delay))
     conn.close()
 
 def getConnection():
@@ -288,8 +299,9 @@ def idea3Parallel(fnames, mpl, nsize, iso_level):
     min_response = 10000000000000000
     max_response = -1
     num_terminate = 0
-    monitor = [[0 for _ in range(9)] for i in range(5)] # wtf
+    monitor = [[0 for _ in range(9)] for i in range(6)] # wtf
     curr_idx = 0
+    total_delay_time = 0
     while num_terminate != mpl:
         try:
             result = result_queue.get_nowait()
@@ -300,6 +312,7 @@ def idea3Parallel(fnames, mpl, nsize, iso_level):
                 max_response = max(max_response, result[3])
                 min_response = min(min_response, result[4])
                 num_terminate += 1
+                total_delay_time += result[5]
             else:
                 # Because I really want to see progress
                 # (-1, id, percent, len(transactions), total_response_time, max_response_time, min_response_time)
@@ -309,6 +322,7 @@ def idea3Parallel(fnames, mpl, nsize, iso_level):
                 monitor[2][idx] += result[4] # total response time
                 monitor[3][idx] = max(monitor[3][idx], result[5]) # max
                 monitor[4][idx] = min(monitor[3][idx], result[6]) # min
+                monitor[5][idx] += result[7] # delay
                 # Not too sure why this skips 80%
                 if monitor[0][idx] == mpl and idx >= curr_idx:
                     curr_idx = idx
@@ -319,6 +333,7 @@ def idea3Parallel(fnames, mpl, nsize, iso_level):
                     print(f"Total Clock Time: {curr_elapsed:.02f}s")
                     print(f"Num Txns: {monitor[1][idx]}/{num}, {monitor[1][idx]/num*100:.02f}%")
                     print(f"Avg Response Time: {monitor[2][idx]/monitor[1][idx]:.07f} s/txn")
+                    print(f"Avg Response Time with failure: {monitor[5][idx]/monitor[1][idx]:.07f} s/txn")
                     print(f"Avg Throughput: {monitor[1][idx]/curr_elapsed:.02f} txn/s")
                     print(f"Max Response Time: {monitor[3][idx]:.07f}s")
                     print(f"Min Response Time: {monitor[4][idx]:.07f}s")
@@ -332,16 +347,18 @@ def idea3Parallel(fnames, mpl, nsize, iso_level):
     print(f"Simulation ended in {elapsed_time} seconds.\n")
     
     avg_response = total_time/num_transactions
+    avg_response_delay = total_delay_time/num_transactions
     throughput = num_transactions/elapsed_time
     print("--------------------")
     print(f"Total Response Time: {total_time:.02f}s")
     print(f"Total Clock Time: {elapsed_time:.02f}s")
     print(f"Num Txns: {num_transactions}")
     print(f"Avg Response Time: {avg_response:.07f} s/txn")
+    print(f"Avg Response Time with failure: {avg_response_delay:.07f} s/txn")
     print(f"Avg Throughput: {throughput:.02f} txn/s")
     print(f"Max Response Time: {max_response:.07f}s")
     print(f"Min Response Time: {min_response:.07f}s")
-    return total_time, elapsed_time, num_transactions, avg_response, throughput, max_response, min_response
+    return total_time, elapsed_time, num_transactions, avg_response, throughput, max_response, min_response, avg_response_delay
 
 
 def cleanDatabase(createDBfname, dropDBfname):
@@ -375,14 +392,14 @@ def main():
     query_filename = f'./queries/{args.conc}_concurrency/queries.txt'
     obs_filename = f'./data/{args.conc}_concurrency/observation_{args.conc}_concurrency.sql'
     semobs_filename = f'./data/{args.conc}_concurrency/semantic_observation_{args.conc}_concurrency.sql'
-    preprocessed_filename = f'./preprocessed.csv'
+    preprocessed_filename = f'./preprocessed_{args.conc}.csv'
 
     create_table_filename = f'./Docker/create.sql'
     drop_table_filename = f'./Docker/drop.sql'
 
     result_file = f'./results/result_{args.conc}.csv'
 
-    fields = ['txn_size', 'mpl', "isolation_level", 'total_response_time', 'elapsed_time', 'num_transactions', 'avg_response', 'throughput', 'max_response', 'min_response']
+    fields = ['txn_size', 'mpl', "isolation_level", 'total_response_time', 'elapsed_time', 'num_transactions', 'avg_response', 'throughput', 'max_response', 'min_response', 'avg_transaction_delay']
     with open(result_file, 'w') as f:
         writer = csv.writer(f)
         writer.writerow(fields)
@@ -395,7 +412,7 @@ def main():
     # Idea #2: main process generates transactions, worker process sleeps if time does not match up
     # Idea #3: divide transactions amongst N workers, each worker sleeps (pro: no input queue needed) (con: some processes may finish a lot earlier than others)
     #idea3Parallel(workload, args.mpl, args.nsize, isolation_levels[args.isolation])
-    for txn_size in [1, 4, 16, 32]:
+    for txn_size in [150, 100, 50, 10, 1]:
         for mpl in [256, 128, 64, 32, 16]:
             for iso_level in ["SERIALIZABLE", "REPEATABLE READ", "READ COMMITTED"]:
                 print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
@@ -404,8 +421,8 @@ def main():
                 print("Database cleaned.")
                 insertMetadata(metadata_filename)
                 print("Metadata inserted.")
-                total_response_time, elapsed_time, num_transactions, avg_response, throughput, max_response, min_response = idea3Parallel((query_filename, obs_filename, semobs_filename, preprocessed_filename), mpl, txn_size, iso_level)
-                result = [txn_size, mpl, iso_level, total_response_time, elapsed_time, num_transactions, avg_response, throughput, max_response, min_response]
+                total_response_time, elapsed_time, num_transactions, avg_response, throughput, max_response, min_response, avg_delay= idea3Parallel((query_filename, obs_filename, semobs_filename, preprocessed_filename), mpl, txn_size, iso_level)
+                result = [txn_size, mpl, iso_level, total_response_time, elapsed_time, num_transactions, avg_response, throughput, max_response, min_response, avg_delay]
                 with open(result_file, 'a') as f:
                     writer = csv.writer(f)
                     writer.writerow(result)
