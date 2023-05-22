@@ -8,6 +8,7 @@ import psycopg2 as pg2
 import multiprocessing as mp
 from dotenv import load_dotenv
 from datetime import datetime
+from subprocess import call, check_call
 
 load_dotenv()
 random.seed(1234)
@@ -98,12 +99,18 @@ def workerIdea3(pipe, result_q, iso_level, barrier, start_time, id):
                 response = time.time() - response_start
                 break
             except:
-                conn.rollback()
+                try:
+                    conn.rollback()
+                except:
+                    pass
                 time.sleep(0.01)
                 if time.time() - start_time > CUTOFF_TIME_THRESHOLD:
                     cur.close()
-                    result_q.put_nowait((0, len(transactions), total_response_time, max_response_time, min_response_time, total_response_time_delay))
-                    conn.close()
+                    result_q.put_nowait((0, idx, total_response_time, max_response_time, min_response_time, total_response_time_delay))
+                    try:
+                        conn.close()
+                    except:
+                        pass
                     return
 
         cur.close()
@@ -291,7 +298,7 @@ def idea3Parallel(fnames, mpl, nsize, iso_level):
     barrier.wait()
     while time.time() < start_time:
         continue
-    print("Starting Simulation")
+    print(f"Starting Simulation: {datetime.now()}")
 
     # Collect data point from queue to avoid excessive RAM usage
     num_transactions = 0
@@ -302,7 +309,12 @@ def idea3Parallel(fnames, mpl, nsize, iso_level):
     monitor = [[0 for _ in range(9)] for i in range(6)] # wtf
     curr_idx = 0
     total_delay_time = 0
+    time_up = False
     while num_terminate != mpl:
+        if time.time() - start_time > CUTOFF_TIME_THRESHOLD:
+            time_up = True
+            print("THRESHOLD ")
+            check_call(["./docker_refresh.sh", '1'])
         try:
             result = result_queue.get_nowait()
             if result[0] == 0:
@@ -340,8 +352,10 @@ def idea3Parallel(fnames, mpl, nsize, iso_level):
                     print('----------------------------')  
         except queue.Empty:
             pass
-    
-    elapsed_time = time.time() - start_time
+    if time_up:
+        elapsed_time = CUTOFF_TIME_THRESHOLD
+    else:
+        elapsed_time = time.time() - start_time
     for proc in processes:
         proc.join()
     print(f"Simulation ended in {elapsed_time} seconds.\n")
@@ -417,8 +431,10 @@ def main():
             for iso_level in ["SERIALIZABLE", "REPEATABLE READ", "READ COMMITTED"]:
                 print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
                 print(f"TEST {args.conc} concurrency: Parameters - txn size={txn_size}, mpl={mpl}, isolation level={iso_level}")
-                cleanDatabase(create_table_filename, drop_table_filename)
-                print("Database cleaned.")
+                # cleanDatabase(create_table_filename, drop_table_filename)
+                # print("Database cleaned.")
+                call("./docker_refresh.sh")
+                print("Docker Postgres refreshed.")
                 insertMetadata(metadata_filename)
                 print("Metadata inserted.")
                 total_response_time, elapsed_time, num_transactions, avg_response, throughput, max_response, min_response, avg_delay= idea3Parallel((query_filename, obs_filename, semobs_filename, preprocessed_filename), mpl, txn_size, iso_level)
