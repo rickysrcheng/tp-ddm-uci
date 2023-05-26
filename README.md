@@ -16,14 +16,6 @@ chmod +x ./docker_refresh.sh
 ./load_dotenv.sh
 ```
 
-Then, set up PostgresDB using
-
-```{.bash}
-./docker_refresh.sh
-```
-
-The script will delete the old database and create a new PostgresDB instance with the empty tables.
-
 ### Debugging
 
 If you already have a PostgreSQL instance running on port 5432, then you can either 
